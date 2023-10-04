@@ -1,21 +1,30 @@
-use std::{cell::Cell, fmt::Binary, sync::Arc};
+use std::cell::Cell;
 
-use super::lexer::{Token, TokenKind};
+use crate::ast::lexer::{Lexer, Token, TokenKind};
+use crate::ast::{
+    Ast, BinOpAssociativity, BinOpKind, BinOperator, ElseBranch, Expr, ExprId, FuncDeclParameter,
+    FunctionReturnTypeSyntax, Item, ItemKind, StaticTypeAnnotation, Stmt, StmtId, UnOpKid,
+    UnOperator, UnaryExpr,
+};
+use crate::diagnostics::DiagnosticsBagCell;
 
+#[derive(Debug, Clone)]
 pub struct Counter {
     value: Cell<usize>,
 }
 
 impl Counter {
     pub fn new() -> Self {
-        Counter {
+        Self {
             value: Cell::new(0),
         }
     }
+
     pub fn increment(&self) {
         let current_value = self.value.get();
         self.value.set(current_value + 1);
     }
+
     pub fn get_value(&self) -> usize {
         self.value.get()
     }
@@ -69,7 +78,8 @@ impl<'a> Parser<'a> {
             TokenKind::Return => self.parse_return_statement().id,
             _ => self.parse_expression_statement().id,
         };
-        self.consume_if(TokenKind::SemiColon)
+        self.consume_if(TokenKind::SemiColon);
+        stmt
     }
 
     fn parse_func_expr(&mut self, func_keyword: Token) -> &Expr {
@@ -79,6 +89,7 @@ impl<'a> Parser<'a> {
         self.ast
             .func_expr(func_keyword, parameters, body, return_type)
     }
+
     fn parse_optional_return_type(&mut self) -> Option<FunctionReturnTypeSyntax> {
         if self.current().kind == TokenKind::Arrow {
             let arrow = self.consume_and_check(TokenKind::Arrow).clone();
@@ -87,6 +98,7 @@ impl<'a> Parser<'a> {
         }
         return None;
     }
+
     fn parse_optional_parameter_list(&mut self) -> Vec<FuncDeclParameter> {
         if self.current().kind != TokenKind::LeftParen {
             return Vec::new();
@@ -95,7 +107,7 @@ impl<'a> Parser<'a> {
         let mut parameters = Vec::new();
         while self.current().kind != TokenKind::RightParen && !self.is_at_end() {
             parameters.push(FuncDeclParameter {
-                identifier: Arc::new(self.consume_and_check(TokenKind::Identifier).clone()),
+                identifier: self.consume_and_check(TokenKind::Identifier).clone(),
                 type_annotation: self.parse_type_annotation(),
             });
             if self.current().kind == TokenKind::Comma {
@@ -105,11 +117,14 @@ impl<'a> Parser<'a> {
         self.consume_and_check(TokenKind::RightParen);
         parameters
     }
+
     fn parse_return_statement(&mut self) -> &Stmt {
         let return_keyword = self.consume_and_check(TokenKind::Return).clone();
+        // todo: allow empty return statements
         let expression = self.parse_expr();
         self.ast.return_statement(return_keyword, Some(expression))
     }
+
     fn parse_while_statement(&mut self) -> &Stmt {
         let while_keyword = self.consume_and_check(TokenKind::While).clone();
         let condition_expr = self.parse_expr();
@@ -151,6 +166,7 @@ impl<'a> Parser<'a> {
         let optional_type_annotation = self.parse_optional_type_annotation();
         self.consume_and_check(TokenKind::Equals);
         let expr = self.parse_expr();
+
         self.ast
             .let_statement(identifier, expr, optional_type_annotation)
     }
@@ -176,6 +192,7 @@ impl<'a> Parser<'a> {
     fn parse_expr(&mut self) -> ExprId {
         self.parse_assignment_expression()
     }
+
     fn parse_assignment_expression(&mut self) -> ExprId {
         if self.current().kind == TokenKind::Identifier {
             if self.peek(1).kind == TokenKind::Equals {
@@ -201,6 +218,7 @@ impl<'a> Parser<'a> {
             }
             self.consume();
             let mut right = self.parse_unary_expression();
+
             while let Some(inner_operator) = self.parse_binary_operator() {
                 let greater_precedence = inner_operator.precedence() > operator.precedence();
                 let equal_precedence = inner_operator.precedence() == operator.precedence();
@@ -210,10 +228,11 @@ impl<'a> Parser<'a> {
                 {
                     break;
                 }
+
                 right = self.parse_binary_expression_recurse(
                     right,
                     std::cmp::max(operator.precedence(), inner_operator.precedence()),
-                )
+                );
             }
             left = self.ast.binary_expression(operator, left, right).id;
         }
@@ -267,7 +286,8 @@ impl<'a> Parser<'a> {
         let expr = match token.kind {
             TokenKind::Rec => self.ast.rec_expression(token),
             TokenKind::Func => self.parse_func_expr(token),
-            TokenKind::OpenBrace => self.parse_if_expression(token),
+            TokenKind::OpenBrace => self.parse_block_expression(token),
+            TokenKind::If => self.parse_if_expression(token),
             TokenKind::Number(number) => self.ast.number_expression(token, number),
             TokenKind::LeftParen => {
                 let expr = self.parse_expr();
@@ -287,8 +307,9 @@ impl<'a> Parser<'a> {
                     .report_expected_expression(&token);
                 self.ast.error_expression(token.span)
             }
-        };
-        let expr = expr.id;
+        }
+        .id;
+
         return match &self.current().kind {
             TokenKind::LeftParen => self.parse_call_expression(expr),
             _ => expr,
@@ -296,11 +317,11 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_call_expression(&mut self, callee: ExprId) -> ExprId {
-        let left_paren = self.consume_and_check(TokenKind::LeftParen);
+        let left_paren = self.consume_and_check(TokenKind::LeftParen).clone();
         let mut arguments = Vec::new();
         while self.current().kind != TokenKind::RightParen && !self.is_at_end() {
             arguments.push(self.parse_expr());
-            if (self.current().kind != TokenKind::RightParen) {
+            if self.current().kind != TokenKind::RightParen {
                 self.consume_and_check(TokenKind::Comma);
             }
         }
@@ -318,27 +339,31 @@ impl<'a> Parser<'a> {
         }
         self.tokens.get(index).unwrap()
     }
+
     fn current(&self) -> &Token {
         self.peek(0)
     }
+
     fn consume(&self) -> &Token {
         self.current.increment();
         self.peek(-1)
     }
-    fn consume_and_check(&self, kind: TokenKind) -> &Token {
-        let token = self.consume();
-        if token.kind != kind {
-            self.diagnostics_bag
-                .borrow_mut()
-                .report_unexpected_token(&kind, token)
-        }
-        token
-    }
+
     fn consume_if(&self, kind: TokenKind) -> Option<&Token> {
         if self.current().kind == kind {
             Some(self.consume())
         } else {
             None
         }
+    }
+
+    fn consume_and_check(&self, kind: TokenKind) -> &Token {
+        let token = self.consume();
+        if token.kind != kind {
+            self.diagnostics_bag
+                .borrow_mut()
+                .report_unexpected_token(&kind, token);
+        }
+        token
     }
 }

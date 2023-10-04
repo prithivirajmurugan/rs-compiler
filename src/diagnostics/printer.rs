@@ -3,14 +3,14 @@ use crate::text::SourceText;
 use std::cmp;
 use termion::color::{Fg, Red, Reset};
 
-pub struct DiagnosticPrinter<'a> {
+pub struct DiagnosticsPrinter<'a> {
     text: &'a SourceText,
     diagnostics: &'a [Diagnostic],
 }
 
 const PREFIX_LENGTH: usize = 8;
 
-impl<'a> DiagnosticPrinter<'a> {
+impl<'a> DiagnosticsPrinter<'a> {
     pub fn new(text: &'a SourceText, diagnostics: &'a [Diagnostic]) -> Self {
         Self { text, diagnostics }
     }
@@ -77,6 +77,7 @@ impl<'a> DiagnosticPrinter<'a> {
         let arrow_line = format!("{:indent$}|", "", indent = indent);
         (arrow_pointers, arrow_line)
     }
+
     fn get_text_spans(
         &'a self,
         diagnostic: &Diagnostic,

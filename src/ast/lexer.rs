@@ -93,9 +93,9 @@ impl Display for TokenKind {
 }
 #[derive(Debug, PartialEq, Clone)]
 pub struct TextSpan {
-    start: usize,
-    end: usize,
-    literal: String,
+    pub start: usize,
+    pub end: usize,
+    pub literal: String,
 }
 
 impl TextSpan {

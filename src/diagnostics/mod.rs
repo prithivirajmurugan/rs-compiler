@@ -1,6 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::ast::lexer::{TextSpan, Token, TokenKind};
+use crate::ast::lexer::{Token, TokenKind};
+use crate::text::span::TextSpan;
 
 pub mod printer;
 
